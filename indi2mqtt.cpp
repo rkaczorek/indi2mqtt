@@ -1,5 +1,5 @@
 /*******************************************************************************
-  Copyright(c) 2021 Radek Kaczorek  <rkaczorek AT gmail DOT com>
+  Copyright(c) 2023 Radek Kaczorek  <rkaczorek AT gmail DOT com>
 
  This library is free software; you can redistribute it and/or
  modify it under the terms of the GNU Library General Public
@@ -26,17 +26,62 @@
 #include <memory>
 
 #include <unistd.h>
+#include <mosquitto.h> // https://mosquitto.org/api/files/mosquitto-h.html
+#include <signal.h>
+#include "config.h"
+
 
 int main(int, char *[])
 {
+	signal(SIGINT, handleSignal);
+	signal(SIGTERM, handleSignal);
+
     Indi2Mqtt indi2mqtt;
     indi2mqtt.setServer("localhost", 7624);
 
     //indi2mqtt.setBLOBMode(B_ALSO, "Simple CCD", nullptr);
     //indi2mqtt.enableDirectBlobAccess("Simple CCD", nullptr);
 
-    //std::cout << "Press Enter key to terminate indi2mqtt.\n";
-    //std::cin.ignore();
+	mosquitto_lib_init();
+	sprintf(mqtt_clientid, "indi2mqtt-%d", getpid());
+	mosq = mosquitto_new(mqtt_clientid, mqtt_clean_session, 0);
+
+	if (mosq)
+	{
+		mosquitto_connect_callback_set(mosq, mqttConnectCallback);
+		mosquitto_disconnect_callback_set(mosq, mqttDisconnectCallback);
+		mosquitto_subscribe_callback_set(mosq, mqttSubscribeCallback);
+		mosquitto_message_callback_set(mosq, mqttMsgCallback);
+
+		mosquitto_username_pw_set(mosq, MQTT_USER, MQTT_PASS);
+
+		int rc = mosquitto_connect(mosq, MQTT_HOST, MQTT_PORT, MQTT_KEEP_ALIVE);
+		
+		//mosquitto_subscribe(mosq, NULL, "environment/pws-b5f0/temperature", 0);
+
+
+		// ADD mqtt will
+
+		// publish immediate status
+		indi2mqtt.mqttINDIStatus(false);
+		
+		while (true)
+		{
+			//mosquitto_reconnect(mosq);
+			mosquitto_loop(mosq, -1, 1);
+
+			// indi reconnection loop
+			if (!indi2mqtt.isServerConnected())
+			{
+				while (!indi2mqtt.isServerConnected())
+				{
+					indi2mqtt.connectServer();
+					sleep(3);
+				}
+			}
+			usleep(1000000);
+		}
+	}
 }
 
 /**************************************************************************************
@@ -44,22 +89,6 @@ int main(int, char *[])
 ***************************************************************************************/
 Indi2Mqtt::Indi2Mqtt()
 {
-	// publish immediate status
-	mqttINDIStatus(false);
-	
-	// master loop
-	while (1)
-	{
-		if (!isServerConnected())
-		{
-			while (!isServerConnected())
-			{
-				connectServer();
-				sleep(3);
-			}
-		}
-		usleep(10000);
-	}
 }
 
 /**************************************************************************************
@@ -316,15 +345,45 @@ void Indi2Mqtt::serverDisconnected(int exit_code)
 	IDLog("INDI Server Disconnected\n");
 }
 
+/**************************************************************************************
+**
+***************************************************************************************/
+void handleSignal(int s)
+{
+	switch (s) {
+		case (SIGINT):
+			mosquitto_destroy(mosq);
+			mosquitto_lib_cleanup();
+			exit(0);
+			break;
+		case (SIGTERM):
+			mosquitto_destroy(mosq);
+			mosquitto_lib_cleanup();
+			exit(0);
+			break;
+		default:
+			mosquitto_destroy(mosq);
+			mosquitto_lib_cleanup();
+			exit(0);
+	}
+}
+
+/**************************************************************************************
+**
+***************************************************************************************/
 void Indi2Mqtt::mqttPublish(char topic[1024], char msg[128])
 {
 	// publish mqtt message
 	char topic_normal[1024];
-	strcpy(topic_normal, sanitizeTopic(topic));
+    sprintf(topic_normal, "%s/%s", MQTT_ROOT_TOPIC, sanitizeTopic(topic));
 
-	//IDLog("%s/%s: %s\n", MQTT_ROOT_TOPIC, topic_normal, msg);
+	//IDLog("%s: %s\n", topic_normal, msg);
+	mosquitto_publish(mosq, NULL, topic_normal, strlen(msg), msg, 0, 0);
 }
 
+/**************************************************************************************
+**
+***************************************************************************************/
 char * Indi2Mqtt::sanitizeTopic (char topic[1024])
 {
 	// replace invalid characters with _ & convert all to lower case
@@ -340,6 +399,9 @@ char * Indi2Mqtt::sanitizeTopic (char topic[1024])
 	return topic;
 }
 
+/**************************************************************************************
+**
+***************************************************************************************/
 void Indi2Mqtt::mqttINDIStatus(bool connected)
 {
 	char status[16];
@@ -349,5 +411,48 @@ void Indi2Mqtt::mqttINDIStatus(bool connected)
 		mqttPublish(status, "connected");
 	} else {
 		mqttPublish(status, "disconnected");
+	}
+}
+
+/**************************************************************************************
+**
+***************************************************************************************/
+void mqttConnectCallback(struct mosquitto *mosq, void *obj, int result)
+{
+	IDLog("Connected to MQTT broker\n");
+	//printf("connect callback, rc=%d\n", result);
+}
+
+/**************************************************************************************
+**
+***************************************************************************************/
+void mqttDisconnectCallback(struct mosquitto *mosq, void *obj, int result)
+{
+	IDLog("Disconnected from MQTT broker\n");
+	//printf("disconnect callback, rc=%d\n", result);
+}
+
+/**************************************************************************************
+**
+***************************************************************************************/
+void mqttSubscribeCallback(struct mosquitto *mosq, void *obj, int mid, int qos_count, const int *granted_qos)
+{
+	IDLog("Subscribed to MQTT topic\n");
+	//printf("subscribe callback, rc=%d\n", mid);
+}
+
+/**************************************************************************************
+**
+***************************************************************************************/
+void mqttMsgCallback(struct mosquitto *mosq, void *obj, const struct mosquitto_message *message)
+{
+	bool match = 0;
+	IDLog("Received MQTT message '%.*s' for topic '%s'\n", message->payloadlen, (char*) message->payload, message->topic);
+	//printf("got message '%.*s' for topic '%s'\n", message->payloadlen, (char*) message->payload, message->topic);
+
+	mosquitto_topic_matches_sub("environment/pws-b5f0/temperature", message->topic, &match);
+	if (match) {
+		IDLog("Received temperature from pws-b5f0\n");
+		//printf("got temperature from pws-b5f0\n");
 	}
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
-  Copyright(c) 2021 Radek Kaczorek  <rkaczorek AT gmail DOT com>
+  Copyright(c) 2023 Radek Kaczorek  <rkaczorek AT gmail DOT com>
 
  This library is free software; you can redistribute it and/or
  modify it under the terms of the GNU Library General Public
@@ -24,17 +24,19 @@
 #define CONFIG_FILE "/etc/astroberry-mqtt.conf"
 #define INDI_HOST "localhost"
 #define INDI_PORT 7624
-#define MQTT_HOST "nasa.local"
+#define MQTT_HOST "192.168.1.150"
 #define MQTT_PORT 1883
 #define MQTT_USER ""
 #define MQTT_PASS ""
 #define MQTT_ROOT_TOPIC "indiserver"
+#define MQTT_KEEP_ALIVE 60
 
 class Indi2Mqtt : public INDI::BaseClient
 {
     public:
         Indi2Mqtt();
         ~Indi2Mqtt() = default;
+		void mqttINDIStatus(bool connected);
 
     protected:
 		void newDevice (INDI::BaseDevice dp) override;
@@ -54,8 +56,17 @@ class Indi2Mqtt : public INDI::BaseClient
 		char* getDeviceType(uint16_t deviceType);
 		char * sanitizeTopic (char topic[1024]);
 		void mqttPublish(char topic[1024], char msg[128]);
-		void mqttINDIStatus(bool connected);
 
     private:
         INDI::BaseDevice mSimpleCCD;
 };
+
+struct mosquitto *mosq = NULL;
+bool mqtt_clean_session = true;
+char mqtt_clientid[32] = {};
+void handleSignal(int s);
+void mqttConnectCallback(struct mosquitto *mosq, void *obj, int result);
+void mqttDisconnectCallback(struct mosquitto *mosq, void *obj, int result);
+void mqttSubscribeCallback(struct mosquitto *mosq, void *obj, int mid, int qos_count, const int *granted_qos);
+void mqttMsgCallback(struct mosquitto *mosq, void *obj, const struct mosquitto_message *message);
+void mqttPublish(char* topic, char* msg);
