@@ -1,0 +1,25 @@
+Source: indi2mqtt
+Section: science
+Priority: extra
+Maintainer: Radek Kaczorek <rkaczorek@gmail.com>
+Build-Depends: debhelper (>= 9), cdbs, cmake (>= 2.4.7), libindi-dev, libmosquitto-dev
+Standards-Version: 3.9.1
+
+Package: indi2mqtt
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libindi1
+Conflicts: indi-mqtt
+Replaces: indi-mqtt
+Description: MQTT bridge to INDI
+ .
+ ndi2mqtt onitors devices connected to an INDI server and publishes their properties to a MQTT server.
+
+Package: indi2mqtt-dbg
+Priority: extra
+Section: debug
+Architecture: any
+Depends: indi2mqtt (= ${binary:Version}), ${misc:Depends}
+Description: MQTT bridge to INDI
+ .
+ ndi2mqtt monitors devices connected to an INDI server and publishes their properties to a MQTT server.
+

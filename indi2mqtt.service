@@ -1,0 +1,15 @@
+# File to be placed under /etc/systemd/system/
+[Unit]
+Description=Astroberry MQTT gateway
+After=multi-user.target
+
+[Service]
+Type=idle
+User=nobody
+StandardError=null
+ExecStart=/usr/bin/astroberry-mqtt
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
